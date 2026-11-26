@@ -25,16 +25,20 @@ jobs:
       - name: Install frontend deps
         run: npm ci
 
-      - name: Fetch ffmpeg
+      - name: Fetch ffmpeg (shared build)
         shell: pwsh
         run: |
-          $url = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          # 共享构建：ffmpeg/ffprobe 的编解码库放在 DLL 里共用，
+          # 比静态构建省约 100MB（静态版两个 exe 各带一份完整库）。
+          $url = "https://github.com/GyanD/codexffmpeg/releases/download/9.1/ffmpeg-9.1-full_build-shared.zip"
           Invoke-WebRequest -Uri $url -OutFile ff.zip
           Expand-Archive ff.zip -DestinationPath ff
           $bin = (Get-ChildItem ff -Recurse -Filter ffmpeg.exe | Select-Object -First 1).DirectoryName
           New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
           Copy-Item "$bin/ffmpeg.exe"  "src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe"
           Copy-Item "$bin/ffprobe.exe" "src-tauri/binaries/ffprobe-x86_64-pc-windows-msvc.exe"
+          # DLL 必须和 exe 同目录，否则启动即失败
+          Copy-Item "$bin/*.dll" "src-tauri/binaries/"
 
       - name: Build
         run: npm run tauri build
@@ -46,4 +50,5 @@ jobs:
             src-tauri/target/release/format-studio.exe
             src-tauri/target/release/ffmpeg.exe
             src-tauri/target/release/ffprobe.exe
+            src-tauri/target/release/*.dll
             src-tauri/target/release/bundle/nsis/*.exe

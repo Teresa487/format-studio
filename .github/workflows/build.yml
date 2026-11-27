@@ -43,6 +43,11 @@ jobs:
       - name: Build
         run: npm run tauri build
 
+      - name: Copy runtime DLLs next to portable exe
+        shell: pwsh
+        run: |
+          Copy-Item "src-tauri/binaries/*.dll" "src-tauri/target/release/" -Force
+
       - uses: actions/upload-artifact@v4
         with:
           name: format-studio-windows

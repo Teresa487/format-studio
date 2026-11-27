@@ -39,6 +39,10 @@ export interface MediaInfo {
   video_codec: string | null;
   audio_codec: string | null;
   fps: number;
+  video_bitrate: number | null;
+  audio_bitrate: number | null;
+  audio_channels: number | null;
+  format_name: string | null;
   size_bytes: number;
   has_video: boolean;
   error: string | null;
@@ -56,12 +60,6 @@ export interface Task {
   params: EncodeParams;
   error: string | null;
   created_at: number;
-}
-
-export interface Preset extends EncodeParams {
-  id: string;
-  name: string;
-  desc: string;
 }
 
 export interface HwInfo {

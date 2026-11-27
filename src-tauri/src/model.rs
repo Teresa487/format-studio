@@ -194,16 +194,3 @@ impl Task {
         p
     }
 }
-
-// ---------------------------------------------------------------------------
-// 预设
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Preset {
-    pub id: String,
-    pub name: String,
-    pub desc: String,
-    #[serde(flatten)]
-    pub params: EncodeParams,
-}

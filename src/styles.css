@@ -949,3 +949,18 @@ input[type="range"]:disabled::-webkit-slider-thumb {
   font-size: 10.5px;
   color: var(--text-2);
 }
+
+.source-info {
+  padding: 8px 9px;
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+
+.source-info-value {
+  margin-top: 4px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--text-0);
+  font-variant-numeric: tabular-nums;
+}

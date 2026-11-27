@@ -15,6 +15,10 @@ pub struct MediaInfo {
     pub video_codec: Option<String>,
     pub audio_codec: Option<String>,
     pub fps: f64,
+    pub video_bitrate: Option<u32>,
+    pub audio_bitrate: Option<u32>,
+    pub audio_channels: Option<u32>,
+    pub format_name: Option<String>,
     pub size_bytes: u64,
     pub has_video: bool,
     pub error: Option<String>,
@@ -36,12 +40,15 @@ struct ProbeStream {
     height: Option<u32>,
     avg_frame_rate: Option<String>,
     duration: Option<String>,
+    bit_rate: Option<String>,
+    channels: Option<u32>,
 }
 
 #[derive(Deserialize)]
 struct ProbeFormat {
     duration: Option<String>,
     size: Option<String>,
+    format_name: Option<String>,
 }
 
 fn parse_rate(s: &str) -> f64 {
@@ -69,6 +76,10 @@ pub fn probe(path: &Path) -> MediaInfo {
         video_codec: None,
         audio_codec: None,
         fps: 0.0,
+        video_bitrate: None,
+        audio_bitrate: None,
+        audio_channels: None,
+        format_name: None,
         size_bytes: path.metadata().map(|m| m.len()).unwrap_or(0),
         has_video: false,
         error: None,
@@ -129,11 +140,20 @@ pub fn probe(path: &Path) -> MediaInfo {
                         .as_deref()
                         .map(parse_rate)
                         .unwrap_or(0.0);
+                    info.video_bitrate = s
+                        .bit_rate
+                        .as_deref()
+                        .and_then(|v| v.parse::<u32>().ok());
                 }
             }
             Some("audio") => {
                 if info.audio_codec.is_none() {
                     info.audio_codec = s.codec_name.clone();
+                    info.audio_bitrate = s
+                        .bit_rate
+                        .as_deref()
+                        .and_then(|v| v.parse::<u32>().ok());
+                    info.audio_channels = s.channels;
                 }
                 if first_audio_dur == 0.0 {
                     first_audio_dur = s
@@ -163,6 +183,8 @@ pub fn probe(path: &Path) -> MediaInfo {
     {
         info.size_bytes = size;
     }
+
+    info.format_name = parsed.format.as_ref().and_then(|f| f.format_name.clone());
 
     if !info.has_video && info.audio_codec.is_none() {
         info.error = Some("未找到可识别的音视频流".into());

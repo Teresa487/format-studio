@@ -14,9 +14,9 @@ import {
   type EncodeParams,
   type HwInfo,
   type MediaInfo,
-  type Preset,
   type Task,
 } from "./types";
+import { paramsFromSource } from "./sourceParams";
 import "./styles.css";
 
 const VIDEO_EXTS = [
@@ -27,13 +27,11 @@ const VIDEO_EXTS = [
 export default function App() {
   const [files, setFiles] = useState<MediaInfo[]>([]);
   const [activePath, setActivePath] = useState<string | null>(null);
-  const [params, setParams] = useState<EncodeParams>(DEFAULT_PARAMS);
-  const [presets, setPresets] = useState<Preset[]>([]);
-  const [activePresetId, setActivePresetId] = useState<string | null>(null);
+  const [paramsByPath, setParamsByPath] = useState<Record<string, EncodeParams>>({});
   const [hw, setHw] = useState<HwInfo>({ accel: "none", label: "CPU" });
   const [useGpu, setUseGpu] = useState(false);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const [trim, setTrim] = useState<TrimValue>({ start: 0, end: 0 });
+  const [trimByPath, setTrimByPath] = useState<Record<string, TrimValue>>({});
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [frames, setFrames] = useState<string[]>([]);
@@ -46,6 +44,23 @@ export default function App() {
   const active = useMemo(
     () => files.find((f) => f.path === activePath) ?? null,
     [files, activePath],
+  );
+
+  const params = useMemo<EncodeParams>(() => {
+    if (!active) return DEFAULT_PARAMS;
+    return (
+      paramsByPath[active.path] ??
+      paramsFromSource(active, useGpu ? hw.accel : "none")
+    );
+  }, [active, paramsByPath, useGpu, hw.accel]);
+
+  const trim = useMemo<TrimValue>(
+    () =>
+      (activePath && trimByPath[activePath]) || {
+        start: 0,
+        end: active?.duration ?? 0,
+      },
+    [activePath, trimByPath, active?.duration],
   );
 
   const flash = useCallback((msg: string) => {
@@ -61,10 +76,16 @@ export default function App() {
         // 有显卡就默认开启加速，日常用户不用自己翻开关
         const on = info.accel !== "none";
         setUseGpu(on);
-        setParams((p) => ({ ...p, hw: on ? info.accel : "none" }));
+        setParamsByPath((prev) =>
+          Object.fromEntries(
+            Object.entries(prev).map(([path, p]) => [
+              path,
+              { ...p, hw: on ? info.accel : "none" },
+            ]),
+          ),
+        );
       })
       .catch(() => {});
-    invoke<Preset[]>("load_presets").then(setPresets).catch(console.error);
     invoke<Task[]>("list_tasks").then(setTasks).catch(console.error);
   }, []);
 
@@ -170,19 +191,26 @@ export default function App() {
   useEffect(() => {
     if (!active) {
       setFrames([]);
-      setTrim({ start: 0, end: 0 });
+      setCurrentTime(0);
       return;
     }
     const dur = active.duration || 0;
-    setTrim({ start: 0, end: dur });
     setCurrentTime(0);
 
-    // 换到更小的素材时，把超出源分辨率的选择降回「保持原始」，
-    // 否则会保留一个界面上已经禁用的非法值
-    const h = active.height || 0;
-    if (h > 0) {
-      setParams((p) => (p.height !== null && p.height > h ? { ...p, height: null } : p));
-    }
+    // 每个文件独立记住一套参数：第一次选中时按源文件自动填好，
+    // 之后用户改过就保留，切换回来不会重置。
+    setParamsByPath((prev) => {
+      if (prev[active.path]) return prev;
+      return {
+        ...prev,
+        [active.path]: paramsFromSource(active, useGpu ? hw.accel : "none"),
+      };
+    });
+
+    // 裁剪区间同样按文件保存
+    setTrimByPath((prev) =>
+      prev[active.path] ? prev : { ...prev, [active.path]: { start: 0, end: dur } },
+    );
 
     if (!active.has_video || dur <= 0) {
       setFrames([]);
@@ -201,57 +229,58 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [active]);
+  }, [active, useGpu, hw.accel]);
 
   // ---------------------------------------------------------------- 交互
   const removeFile = (path: string) => {
     const rest = files.filter((f) => f.path !== path);
     setFiles(rest);
+    setParamsByPath((prev) => {
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+    setTrimByPath((prev) => {
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
     if (activePath === path) setActivePath(rest[0]?.path ?? null);
   };
 
-  const applyPreset = (id: string) => {
-    const p = presets.find((x) => x.id === id);
-    if (!p) return;
-    setActivePresetId(id);
-    const { id: _id, name: _n, desc: _d, ...rest } = p;
-    // 预设里 hw 是 none，用不用显卡由顶部那个开关说了算
-    setParams({ ...rest, hw: useGpu ? hw.accel : "none" });
-  };
-
   const changeParams = (p: EncodeParams) => {
-    setParams(p);
-    setActivePresetId(null); // 手改过就不再算哪个预设了
+    if (!activePath) return;
+    setParamsByPath((prev) => ({ ...prev, [activePath]: p }));
   };
 
   const toggleGpu = (v: boolean) => {
     setUseGpu(v);
-    setParams((p) => ({ ...p, hw: v ? hw.accel : "none" }));
+    const nextHw = v ? hw.accel : "none";
+    setParamsByPath((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).map(([path, p]) => [path, { ...p, hw: nextHw }]),
+      ),
+    );
   };
 
   const startConvert = async () => {
-    const targets = files.filter((f) => !f.error && (f.has_video || f.audio_codec));
-    if (targets.length === 0) {
-      flash("没有可转换的文件");
+    if (!active || active.error || (!active.has_video && !active.audio_codec)) {
+      flash("请先选择一个可转换的文件");
       return;
     }
 
-    for (const f of targets) {
-      // 裁剪区间只作用于正在预览的那个文件，其余按整段转
-      const isActive = f.path === activePath;
-      const trimmed =
-        isActive && trim.end > trim.start + 0.05 && trim.end - trim.start < f.duration - 0.05;
+    const trimmed =
+      trim.end > trim.start + 0.05 && trim.end - trim.start < active.duration - 0.05;
 
-      await invoke("enqueue_task", {
-        input: f.path,
-        duration: f.duration,
-        trim: trimmed ? { start: trim.start, end: trim.end } : null,
-        params,
-      });
-    }
+    await invoke("enqueue_task", {
+      input: active.path,
+      duration: active.duration,
+      trim: trimmed ? { start: trim.start, end: trim.end } : null,
+      params,
+    });
 
     setTasks(await invoke<Task[]>("list_tasks"));
-    flash(`已加入 ${targets.length} 个任务`);
+    flash(`${active.name} 已加入队列`);
   };
 
   const seek = useCallback((t: number) => {
@@ -259,12 +288,16 @@ export default function App() {
     setCurrentTime(t);
   }, []);
 
-  const onTrimChange = useCallback((v: TrimValue) => {
-    setTrim(v);
-    // 拖手柄时播放头跟到入点，用户能直接看到那一帧
-    previewRef.current?.seek(v.start);
-    setCurrentTime(v.start);
-  }, []);
+  const onTrimChange = useCallback(
+    (v: TrimValue) => {
+      if (!activePath) return;
+      setTrimByPath((prev) => ({ ...prev, [activePath]: v }));
+      // 拖手柄时播放头跟到入点，用户能直接看到那一帧
+      previewRef.current?.seek(v.start);
+      setCurrentTime(v.start);
+    },
+    [activePath],
+  );
 
   return (
     <div className="app">
@@ -282,10 +315,10 @@ export default function App() {
         <button
           className="btn"
           onClick={startConvert}
-          disabled={files.length === 0}
-          title="把列表里的文件按当前参数加入队列"
+          disabled={!active || !!active.error}
+          title="只把当前选中的文件加入队列"
         >
-          ▶ 开始转换
+          ▶ 转换当前文件
         </button>
 
         <div className="spacer" />
@@ -365,13 +398,10 @@ export default function App() {
             <ParamPanel
               params={params}
               onChange={changeParams}
-              presets={presets}
-              activePresetId={activePresetId}
-              onPreset={applyPreset}
               hwAccel={hw.accel}
               useGpu={useGpu}
               onUseGpu={toggleGpu}
-              sourceHeight={active?.height ?? 0}
+              source={active}
             />
           </div>
         </div>

@@ -4,7 +4,7 @@ pub mod model;
 mod probe;
 pub mod transcode;
 
-use model::{EncodeParams, HwAccel, Preset, Status, Task, Trim};
+use model::{EncodeParams, HwAccel, Status, Task, Trim};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -38,12 +38,6 @@ fn detect_hw(state: State<'_, AppState>) -> HwInfo {
 #[tauri::command]
 fn probe_file(path: String) -> probe::MediaInfo {
     probe::probe(&PathBuf::from(path))
-}
-
-#[tauri::command]
-fn load_presets() -> Result<Vec<Preset>, String> {
-    let raw = include_str!("../presets/daily.json");
-    serde_json::from_str(raw).map_err(|e| format!("预设文件解析失败: {e}"))
 }
 
 /// 抽帧生成时间轴缩略图。返回本地文件路径，前端用 convertFileSrc 转成可显示的 URL。
@@ -203,7 +197,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             detect_hw,
             probe_file,
-            load_presets,
             make_thumbnails,
             set_output_dir,
             get_output_dir,
